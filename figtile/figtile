@@ -1,0 +1,204 @@
+#!/usr/bin/python
+
+
+'''
+Script for tiling several EPS graphics into one following various rules.
+The input graphics are assumed to be stand-alone EPS graphics, with correct
+bounding boxes.
+The bounding boxes are moved (and/or resized?) according to the specified
+rule and then rendered to the output EPS file.
+'''
+
+from pyx import *
+
+import sys, os.path, logging, argparse
+
+
+#
+# Unit management is a little tricky here, because:
+#  1) EPS files have their bounding boxes specified
+#     in points, which is difficult to use in real-life
+# 
+#  2) User may want to specifiy lengths in mm, cm, inch...
+#
+#  3) PyX, internally, always uses 'm' as the unit of choice.
+#
+# Basically, we're not interested in PyX's internal units, all
+# we care is that (a) we understand what the user wants, and
+# (b) the user understands the debugging/info feedback we're
+# giving.
+# Therefore we're implementing a number of functions which
+# will culminate in the pt2uu() and uu2pt() functions,
+# to translate from user-units to points and vice-versa :-)
+#
+def pt2int (val):
+    '''
+    Points to internal units. Relies on the fact
+    that the 'unit' module has been properly initialized!
+    '''
+    return (val*unit.pt).u
+
+def uu2pt (val):
+    '''
+    Points to user-specified units. Relies on the fact
+    that the 'unit' module has been properly initialized!
+    '''
+    return unit.topt(val)
+
+pt2uu = None ## this needs to be set in the __main__ part!
+pt2uu_map = { "cm":   lambda v: unit.tocm(v*unit.pt),
+              "mm":   lambda v: unit.tomm(v*unit.pt),
+              "inch": lambda v: unit.toinch(v*unit.pt),
+              "pt":   lambda v: unit.topt(v*unit.pt) }
+
+
+def tile_max_width (figs, max_width=None, max_num=None, frames=None):
+    '''
+    Changes bounding box coordinates of specified figures such
+    that they are aligned in rows with a total maximum width
+    specified by the user. If a figure would exceed the maximum
+    width, the algorithm induces a "line break" in the figure
+    succession.
+    '''
+
+    #
+    # go through the images and alignt them one by one
+    # until we run out of "width".
+    #
+    cur_width   = 0
+    cur_height  = 0
+    line_height = 0
+    img         = 0
+    row_break   = False
+    boxes       = []
+    for fig in figs:
+        # check for line break condition (one of several, depending on which mode we're on.
+        # it doesn't actually matter _why_ we perform a line break... the layout algorithm
+        # still remains the same :-)
+        if (max_num is not None   and ((img % max_num) == 0)):
+            log.info("Img %d: row break at max_num=%d" % (img, max_num))
+            row_break = True
+            
+        if (max_width is not None and (cur_width+fig.width_pt) > max_width):
+            log.info("Img %d: row break at width %f+%f < %f" % 
+                     (img, pt2uu(cur_width), pt2uu(fig.width_pt), pt2uu(max_width)))
+            row_break = True
+
+        # actually perform the row break
+        if row_break:
+            cur_width = 0
+            cur_height += line_height
+            line_height = 0
+            row_break = False
+            
+        line_height = max(line_height, fig.height_pt)
+        fig.trafo = trafo.translate (cur_width*unit.pt, cur_height*unit.pt)
+        if frames:
+            boxes.append (path.rect(cur_width*unit.pt, cur_height*unit.pt, fig.width_pt*unit.pt, fig.height_pt*unit.pt))
+        cur_width += fig.width_pt
+        img += 1
+
+    return figs, boxes
+
+
+# alternate name
+tile_max_num = tile_max_width
+
+def arg_parse (args):
+    '''
+    Setup command line options.
+    '''
+    p = argparse.ArgumentParser(description="Scale, overlay and tile EPS graphics onto a single canvas.")
+    
+    act = p.add_mutually_exclusive_group()
+    act.add_argument('-t', '--tile-width', type=float,
+                     help="Tile graphics in of specified maximum width.")
+    act.add_argument('-n', '--tile-num', type=int,
+                     help="Tile up to the specified number of images per row.")
+    #act.add_argument('-m', '--matrix', type=int,
+    #                 help="Tile input files in a MATRIX*N matrix.")
+    #act.add_argument('-l', '--overlay', action="store_true",
+    #                 help="Stamp together (overlay) all input files in the specified order.")
+
+
+    trans = p.add_mutually_exclusive_group()
+    trans.add_argument('-s', '--scale-down', action="store_true",
+                       help="Scale all images to the size of the smallest.")
+    trans.add_argument('-S', '--scale-up', action="store_true",
+                       help="Scale all images to the size of the largest.")    
+    
+    p.add_argument('-f', '--frames', 
+                   help="Draw frames around the graphics tiles.", action="store_true")
+    p.add_argument('-u', '--units', choices=['pt', 'mm', 'cm', 'inch'], default='cm',
+                   help="Units for user-specified measures, e.d. maximum tile width (default: cm).")
+
+    #p.add_argument('-r', '--ignore-ratio', action='store_true',
+    #               help="Do not keep the image ratio when scaling")
+
+    p.add_argument('-o', '--output', nargs='?', default=sys.stdout, type=argparse.FileType('w'),
+                   help="Output file name (EPS or PDF automatically detected from suffix).")
+
+    p.add_argument ('-d', '--debug', action='store_true',
+                    help="Set verbosity level to debug.")
+
+    p.add_argument ('-q', '--quiet', action='store_true',
+                    help="Surpresses informational output on stdout (i.e. all output except for the output EPS file).")
+    
+    p.add_argument('input', nargs='+', type=argparse.FileType('r'),
+                   help="EPS files to process.")
+
+    return p.parse_args (args)
+    
+
+if __name__ == "__main__":
+
+    # set up command line options
+    args = arg_parse (sys.argv[1:])
+
+    
+    # starting logging system
+    log = logging.getLogger (os.path.basename(sys.argv[0]))
+    ch = logging.StreamHandler()
+    fmt = logging.Formatter('%(name)s[%(levelname)s]: %(funcName)s: %(message)s')
+    ch.setFormatter(fmt)
+
+    if args.debug:
+        log.setLevel (logging.DEBUG)
+        ch.setLevel (logging.DEBUG)
+    else:
+        log.setLevel (logging.INFO)
+        ch.setLevel (logging.INFO)
+
+    log.addHandler (ch)
+
+    # set up units
+    unit.set (defaultunit=args.units)
+    pt2uu = pt2uu_map[args.units]
+
+    # style settings for drawing bounding boxes
+    boxes_style  = [ style.linewidth.thin ]
+
+    # loading input files and doing the 
+    figs  = [ epsfile.epsfile (0, 0, f.name) for f in args.input ]
+    [ log.debug ("%s: size[pt]=(%d,%d)  size[%s]=(%f, %f)" 
+                 % (p.name, f.width_pt, f.height_pt, args.units, 
+                    pt2uu(f.width_pt), pt2uu(f.height_pt) ))
+                    for f,p in zip(figs, args.input) ]
+
+    # tiling, scaling etc
+    if args.tile_width is not None:
+        max_width_pt = uu2pt(args.tile_width)
+        log.debug ("Tiling to maximum width: %f %s = %f pt" % (args.tile_width, args.units, max_width_pt))
+        figs, boxes = tile_max_width (figs, max_width=max_width_pt, frames=args.frames)
+        
+    elif args.tile_num is not None:
+        log.debug ("Tiling to maximum of %d figures in a row" % (args.tile_num,))
+        figs, boxes = tile_max_num (figs, max_num=args.tile_num, frames=args.frames)
+        
+    
+    # output
+    can = canvas.canvas()
+    [ can.insert(f) for f in figs ]
+    [ can.stroke(b, bstyle) for b in boxes ]
+    can.writetofile(args.output.name)
+        
