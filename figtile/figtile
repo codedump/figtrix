@@ -148,9 +148,36 @@ def figs_overlay (figs, valign='center', halign='center', frames=None):
     '''
 
     boxes = []
+
+    hdiffs = [ figs[0].width_pt  - f.width_pt  for f in figs ]
+    vdiffs = [ figs[0].height_pt - f.height_pt for f in figs ]
+
+    print "diffs:", hdiffs, vdiffs
+
+    def __get_shifts (diffs, alg):
+        sh = []
+        for d in diffs:
+            if alg == 'center':
+                sh.append (float(d)/2.0)
+            elif alg == 'right' or alg == 'top':
+                sh.append (float(d))
+            else:
+                sh.append (0.0)
+        return sh
             
-    for f in figs:
-        pass
+    for hshift, vshift, f, img in zip(__get_shifts(hdiffs, halign), 
+                                      __get_shifts(vdiffs, valign),
+                                      figs, range(len(figs)) ):
+
+        log.info ("Img %d: moving (%2.2fpt,%2.2fpt) for ha='%s', va='%s'" 
+                  % (img, hshift, vshift, halign, valign))
+        f.trafo *= trafo.translate (hshift*unit.pt, vshift*unit.pt)
+
+        if frames:
+            boxes.append (path.rect(f.x_pt*unit.pt,
+                                    f.y_pt*unit.pt,
+                                    f.width_pt*unit.pt,
+                                    f.height_pt*unit.pt))
 
     return figs, boxes
 
@@ -159,8 +186,10 @@ def arg_parse (args):
     '''
     Setup command line options.
     '''
-    p = argparse.ArgumentParser(description="Scale, overlay and tile EPS graphics onto a single canvas.")
     
+    p = argparse.ArgumentParser(description="Scale, overlay and tile EPS graphics onto a single canvas.")
+
+
     act = p.add_mutually_exclusive_group()
     act.add_argument('-t', '--tile-width', type=float,
                      help="Tile graphics in of specified maximum width.")
@@ -195,10 +224,12 @@ def arg_parse (args):
 
     p.add_argument ('-q', '--quiet', action='store_true',
                     help="Surpresses informational output on stdout (i.e. all output except for the output EPS file).")
+
     
     p.add_argument('input', nargs='+', type=argparse.FileType('r'),
                    help="EPS files to process.")
 
+    
     return p.parse_args (args)
     
 
