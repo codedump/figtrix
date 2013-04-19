@@ -52,7 +52,7 @@ pt2uu_map = { "cm":   lambda v: unit.tocm(v*unit.pt),
               "pt":   lambda v: unit.topt(v*unit.pt) }
 
 
-def tile_max_width (figs, max_width=None, max_num=None, frames=None):
+def figs_tile_max_width (figs, max_width=None, max_num=None, frames=None):
     '''
     Changes bounding box coordinates of specified figures such
     that they are aligned in rows with a total maximum width
@@ -92,17 +92,68 @@ def tile_max_width (figs, max_width=None, max_num=None, frames=None):
             row_break = False
             
         line_height = max(line_height, fig.height_pt)
-        fig.trafo = trafo.translate (cur_width*unit.pt, cur_height*unit.pt)
+        fig.trafo *= trafo.translate (cur_width*unit.pt, cur_height*unit.pt)
         if frames:
             boxes.append (path.rect(cur_width*unit.pt, cur_height*unit.pt, fig.width_pt*unit.pt, fig.height_pt*unit.pt))
         cur_width += fig.width_pt
         img += 1
 
     return figs, boxes
-
-
 # alternate name
-tile_max_num = tile_max_width
+figs_tile_max_num = figs_tile_max_width
+
+
+def figs_scale (figs, scale=None, what='width'):
+    '''
+    Transforms the list of figs to the corresponding scaling:
+      - None: no scaling
+      - 'first': uniform scaling (sx == sy) to the first image
+      - 'up': uniform scaling (sx == sy) to the largest image
+      - 'down': uniform scaling (sx == sy) to the smallest image
+    '''
+    
+    if scale is None or scale == 'none' or scale == '0':
+        _ratio = [1.0] * len(figs)
+    else:
+        # calculate the ideal scale ratio
+        _wratio = [ float(figs[0].width_pt)  / float(f.width_pt)   for f in figs ]
+        _hratio = [ float(figs[0].height_pt) / float(f.height_pt)  for f in figs ]
+
+        # this is the ideal ratio, related to the first figure
+        # 'min' resuls in same width for all pictures
+        # 'max' results in same height for all pictures
+        if what == 'width':
+            _ratio = [ min(_w, _h) for _w, _h in zip (_wratio, _hratio) ]
+        else:
+            _ratio = [ max(_w, _h) for _w, _h in zip (_wratio, _hratio) ]
+
+        if scale is not 'first' and scale is not '1':
+            # scale the ratio to the smallest (or largest) item, depending on user's wish
+            _ref = min (_ratio) if scale == 'up' else max(_ratio)
+            _tmp = [ _r / _ref for _r in _ratio ]
+            _ratio = _tmp
+
+    for f, s, img in zip(figs,_ratio, range(len(figs))):
+        log.info("Img %d: scaling factor %2.2f" % (img, s))
+        f.trafo *= trafo.scale (s, s)
+
+    return figs
+    
+    
+def figs_overlay (figs, valign='center', halign='center', frames=None):
+    '''
+    Aligns a list of images ontop of one another, according to the following parameters:
+      - valign: 'center', 'top', 'bottom'
+      - halign: 'center', 'left', 'right'
+    '''
+
+    boxes = []
+            
+    for f in figs:
+        pass
+
+    return figs, boxes
+
 
 def arg_parse (args):
     '''
@@ -117,23 +168,24 @@ def arg_parse (args):
                      help="Tile up to the specified number of images per row.")
     #act.add_argument('-m', '--matrix', type=int,
     #                 help="Tile input files in a MATRIX*N matrix.")
-    #act.add_argument('-l', '--overlay', action="store_true",
-    #                 help="Stamp together (overlay) all input files in the specified order.")
+    act.add_argument('-l', '--overlay', action="store_true",
+                     help="Stamp together (overlay) all input files in the specified order.")
 
 
     trans = p.add_mutually_exclusive_group()
-    trans.add_argument('-s', '--scale-down', action="store_true",
-                       help="Scale all images to the size of the smallest.")
-    trans.add_argument('-S', '--scale-up', action="store_true",
-                       help="Scale all images to the size of the largest.")    
+    trans.add_argument('-s', '--scale-to-width', type=str, choices=['none', '0', 'first', '1', 'up', 'down' ],
+                       help="Scale all images uniformly to match the width of first, largest, smallest image.")
+    trans.add_argument('-S', '--scale-to-height', type=str, choices=['none', '0', 'first', '1', 'up', 'down' ],
+                       help="Scale all images uniformly to match the height of first, largest, smallest image.")
+    
     
     p.add_argument('-f', '--frames', 
                    help="Draw frames around the graphics tiles.", action="store_true")
     p.add_argument('-u', '--units', choices=['pt', 'mm', 'cm', 'inch'], default='cm',
                    help="Units for user-specified measures, e.d. maximum tile width (default: cm).")
 
-    #p.add_argument('-r', '--ignore-ratio', action='store_true',
-    #               help="Do not keep the image ratio when scaling")
+    p.add_argument('-r', '--ignore-ratio', action='store_true',
+                   help="Do not keep the image ratio when scaling")
 
     p.add_argument('-o', '--output', nargs='?', default=sys.stdout, type=argparse.FileType('w'),
                    help="Output file name (EPS or PDF automatically detected from suffix).")
@@ -185,15 +237,25 @@ if __name__ == "__main__":
                     pt2uu(f.width_pt), pt2uu(f.height_pt) ))
                     for f,p in zip(figs, args.input) ]
 
-    # tiling, scaling etc
+    # scaling:
+    if args.scale_to_width:
+        figs = figs_scale (figs, scale=args.scale_to_width, what='width')
+    elif args.scale_to_height:
+        figs = figs_scale (figs, scale=args.scale_to_height, what='height')
+
+    # aligning: overlay, tiling, etc...
     if args.tile_width is not None:
         max_width_pt = uu2pt(args.tile_width)
         log.debug ("Tiling to maximum width: %f %s = %f pt" % (args.tile_width, args.units, max_width_pt))
-        figs, boxes = tile_max_width (figs, max_width=max_width_pt, frames=args.frames)
+        figs, boxes = figs_tile_max_width (figs, max_width=max_width_pt, frames=args.frames)
         
     elif args.tile_num is not None:
         log.debug ("Tiling to maximum of %d figures in a row" % (args.tile_num,))
-        figs, boxes = tile_max_num (figs, max_num=args.tile_num, frames=args.frames)
+        figs, boxes = figs_tile_max_num (figs, max_num=args.tile_num, frames=args.frames)
+
+    elif args.overlay is not None:
+        log.debug ("Calculating overlay (centered)")
+        figs, boxes = figs_overlay (figs, valign='center', halign='center')
         
     
     # output
