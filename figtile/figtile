@@ -79,9 +79,9 @@ def figs_tile_max_width (figs, max_width=None, max_num=None, frames=None):
             log.info("Img %d: row break at max_num=%d" % (img, max_num))
             row_break = True
             
-        if (max_width is not None and (cur_width+fig.width_pt) > max_width):
+        if (max_width is not None and (cur_width+fig.bbox().width_pt()) > max_width):
             log.info("Img %d: row break at width %f+%f < %f" % 
-                     (img, pt2uu(cur_width), pt2uu(fig.width_pt), pt2uu(max_width)))
+                     (img, pt2uu(cur_width), pt2uu(fig.bbox().width_pt()), pt2uu(max_width)))
             row_break = True
 
         # actually perform the row break
@@ -91,11 +91,12 @@ def figs_tile_max_width (figs, max_width=None, max_num=None, frames=None):
             line_height = 0
             row_break = False
             
-        line_height = max(line_height, fig.height_pt)
+        line_height = max(line_height, fig.bbox().height_pt())
         fig.trafo *= trafo.translate (cur_width*unit.pt, cur_height*unit.pt)
         if frames:
-            boxes.append (path.rect(cur_width*unit.pt, cur_height*unit.pt, fig.width_pt*unit.pt, fig.height_pt*unit.pt))
-        cur_width += fig.width_pt
+            boxes.append (path.rect(cur_width*unit.pt, cur_height*unit.pt,
+                                    fig.bbox().width(), fig.bbox().height()))
+        cur_width += fig.bbox().width_pt()
         img += 1
 
     return figs, boxes
@@ -116,16 +117,16 @@ def figs_scale (figs, scale=None, what='width'):
         _ratio = [1.0] * len(figs)
     else:
         # calculate the ideal scale ratio
-        _wratio = [ float(figs[0].width_pt)  / float(f.width_pt)   for f in figs ]
-        _hratio = [ float(figs[0].height_pt) / float(f.height_pt)  for f in figs ]
+        _wratio = [ float(figs[0].bbox().width_pt())  / float(f.bbox().width_pt())   for f in figs ]
+        _hratio = [ float(figs[0].bbox().height_pt()) / float(f.bbox().height_pt())  for f in figs ]
 
         # this is the ideal ratio, related to the first figure
         # 'min' resuls in same width for all pictures
         # 'max' results in same height for all pictures
         if what == 'width':
-            _ratio = [ min(_w, _h) for _w, _h in zip (_wratio, _hratio) ]
-        else:
             _ratio = [ max(_w, _h) for _w, _h in zip (_wratio, _hratio) ]
+        else:
+            _ratio = [ min(_w, _h) for _w, _h in zip (_wratio, _hratio) ]
 
         if scale is not 'first' and scale is not '1':
             # scale the ratio to the smallest (or largest) item, depending on user's wish
@@ -149,11 +150,14 @@ def figs_overlay (figs, valign='center', halign='center', frames=None):
 
     boxes = []
 
-    hdiffs = [ figs[0].width_pt  - f.width_pt  for f in figs ]
-    vdiffs = [ figs[0].height_pt - f.height_pt for f in figs ]
+    hdiffs = [ figs[0].bbox().width_pt()  - f.bbox().width_pt()  for f in figs ]
+    vdiffs = [ figs[0].bbox().height_pt() - f.bbox().height_pt() for f in figs ]
 
-    print "diffs:", hdiffs, vdiffs
+    print "hdiffs:", hdiffs
+    print "vdiffs:", vdiffs
 
+    # little helper function to calculate per-dimension
+    # offset shifts, depending on scaling settings
     def __get_shifts (diffs, alg):
         sh = []
         for d in diffs:
@@ -164,20 +168,23 @@ def figs_overlay (figs, valign='center', halign='center', frames=None):
             else:
                 sh.append (0.0)
         return sh
+        
             
     for hshift, vshift, f, img in zip(__get_shifts(hdiffs, halign), 
                                       __get_shifts(vdiffs, valign),
                                       figs, range(len(figs)) ):
 
-        log.info ("Img %d: moving (%2.2fpt,%2.2fpt) for ha='%s', va='%s'" 
+        log.info ("Img %d: moving by (%2.2fpt,%2.2fpt) for ha='%s', va='%s'" 
                   % (img, hshift, vshift, halign, valign))
         f.trafo *= trafo.translate (hshift*unit.pt, vshift*unit.pt)
 
         if frames:
-            boxes.append (path.rect(f.x_pt*unit.pt,
-                                    f.y_pt*unit.pt,
-                                    f.width_pt*unit.pt,
-                                    f.height_pt*unit.pt))
+            log.debug ("Img %d: frame at (%f / %f), (%f / %f)" 
+                       % (img,
+                          f.bbox().left_pt(),  f.bbox().bottom_pt(),
+                          f.bbox().width_pt(), f.bbox().height_pt()))
+            boxes.append (path.rect(f.bbox().left(),  f.bbox().bottom(),
+                                    f.bbox().width(), f.bbox().height()))
 
     return figs, boxes
 
@@ -223,7 +230,8 @@ def arg_parse (args):
                     help="Set verbosity level to debug.")
 
     p.add_argument ('-q', '--quiet', action='store_true',
-                    help="Surpresses informational output on stdout (i.e. all output except for the output EPS file).")
+                    help="Surpresses informational output on stdout (i.e. "
+                         "all output except for the output EPS file).")
 
     
     p.add_argument('input', nargs='+', type=argparse.FileType('r'),
@@ -263,9 +271,9 @@ if __name__ == "__main__":
 
     # loading input files and doing the 
     figs  = [ epsfile.epsfile (0, 0, f.name) for f in args.input ]
-    [ log.debug ("%s: size[pt]=(%d,%d)  size[%s]=(%f, %f)" 
-                 % (p.name, f.width_pt, f.height_pt, args.units, 
-                    pt2uu(f.width_pt), pt2uu(f.height_pt) ))
+    [ log.debug ("Input %s: size[pt]=(%d,%d)  size[%s]=(%f, %f)" 
+                 % (p.name, f.bbox().width_pt(), f.bbox().height_pt(), args.units, 
+                    pt2uu(f.bbox().width_pt()), pt2uu(f.bbox().height_pt()) ))
                     for f,p in zip(figs, args.input) ]
 
     # scaling:
@@ -286,12 +294,19 @@ if __name__ == "__main__":
 
     elif args.overlay is not None:
         log.debug ("Calculating overlay (centered)")
-        figs, boxes = figs_overlay (figs, valign='center', halign='center')
+        figs, boxes = figs_overlay (figs, valign='center', halign='center', frames=args.frames)
+
+
+
+    [ log.debug ("Output %s: size[pt]=(%d,%d)  size[%s]=(%f, %f)" 
+                 % (p.name, f.bbox().width_pt(), f.bbox().height_pt(), args.units, 
+                    pt2uu(f.bbox().width_pt()), pt2uu(f.bbox().height_pt()) ))
+                    for f,p in zip(figs, args.input) ]
         
     
     # output
     can = canvas.canvas()
     [ can.insert(f) for f in figs ]
-    [ can.stroke(b, bstyle) for b in boxes ]
+    [ can.stroke(b, boxes_style) for b in boxes ]
     can.writetofile(args.output.name)
         
