@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+# See the variable license_info below for licensing information
 
 '''
 Script for tiling several EPS graphics into one following various rules.
@@ -9,9 +10,33 @@ The bounding boxes are moved (and/or resized?) according to the specified
 rule and then rendered to the output EPS file.
 '''
 
+version_info = '0.1'
+license_info = ''                                                             \
+    'Copyright 2013, Florin Boariu <florin.figtrix@rootshell.ro>\n\n'         \
+    ''                                                                        \
+    'figtile is free software: you can redistribute it and/or modify\n'       \
+    'it under the terms of the GNU General Public License as published by\n'  \
+    'the Free Software Foundation, either version 3 of the License, or\n'     \
+    '(at your option) any later version.\n\n'                                 \
+    ''                                                                        \
+    'This program is distributed in the hope that it will be useful,\n'       \
+    'but WITHOUT ANY WARRANTY; without even the implied warranty of\n'        \
+    'MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n'         \
+    'GNU General Public License for more details.\n'                          \
+    ''                                                                        \
+    'You should have received a copy of the GNU General Public License\n'     \
+    'along with this program.  If not, see <http://www.gnu.org/licenses/>.\n'
+
+
 from pyx import *
 
 import sys, os.path, logging, argparse
+
+
+def print_license ():
+    print "figtile"
+    print "Version: ", version_info
+    print "Copying: ", license_info
 
 
 #
@@ -194,7 +219,8 @@ def arg_parse (args):
     Setup command line options.
     '''
     
-    p = argparse.ArgumentParser(description="Scale, overlay and tile EPS graphics onto a single canvas.")
+    p = argparse.ArgumentParser(description=r"Scale, overlay and tile EPS graphics onto a single "
+                                "canvas. (This program is free software, see --copyright for details.)")
 
 
     act = p.add_mutually_exclusive_group()
@@ -233,8 +259,11 @@ def arg_parse (args):
                     help="Surpresses informational output on stdout (i.e. "
                          "all output except for the output EPS file).")
 
+    p.add_argument ('-C', '--copying', '--copyright', action='store_true',
+                    help="Prints licensing information and exits")
+
     
-    p.add_argument('input', nargs='+', type=argparse.FileType('r'),
+    p.add_argument('input', nargs='*', type=argparse.FileType('r'),
                    help="EPS files to process.")
 
     
@@ -245,6 +274,10 @@ if __name__ == "__main__":
 
     # set up command line options
     args = arg_parse (sys.argv[1:])
+
+    if args.copying == True:
+        print_license()
+        sys.exit(0)
 
     
     # starting logging system
