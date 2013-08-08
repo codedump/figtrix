@@ -30,7 +30,7 @@ license_info = ''                                                             \
 
 from pyx import *
 
-import sys, os.path, logging, argparse
+import sys, os.path, logging, argparse, math
 
 
 def print_license ():
@@ -127,6 +127,52 @@ def figs_tile_max_width (figs, max_width=None, max_num=None, frames=None):
     return figs, boxes
 # alternate name
 figs_tile_max_num = figs_tile_max_width
+
+
+def figs_tile_matrix (figs, rows='auto', cols='auto', frames=None):
+    '''
+    Arranges the figures in an `rows` x `cols` sized matrix, with each
+    matrix cell of the size of the largest image, and each image centered
+    in its cell.
+    '''
+
+    #
+    # go through the images and alignt them one by one
+    # until we run out of "width".
+    #
+
+    if rows == 'auto':
+        if cols == 'auto':
+            cols = math.ceil(math.sqrt ( len(figs)))
+        rows = int(math.ceil( float(len(figs) / cols)))
+    else:
+        cols = int(math.ceil( float(len(figs) / rows)))
+
+    log.info ("Matrix size is %dx%d" % (rows, cols))
+
+
+    # calculate cell size
+    max_width   = max ([f.bbox().width_pt() for f in figs])
+    max_height  = max ([f.bbox().height_pt() for f in figs])
+    img_i = 0
+    img_j = 0
+    boxes = []
+    for fig in figs:
+
+        log.info ("Img %dx%d: (%f, %f)" % (img_i, img_j, (img_i*max_width), (img_j*max_height)))
+        
+        if img_i == cols:
+            img_i = 0
+            img_j -= 1
+        
+        pos_x = (img_i*max_width)*unit.pt - fig.bbox().width()/2
+        pos_y = (img_j*max_height)*unit.pt - fig.bbox().height()/2
+        fig.trafo *= trafo.translate (pos_x, pos_y)
+        if frames:
+            boxes.append (path.rect(pos_x, pos_y, fig.bbox().width(), fig.bbox().height()))
+        img_i += 1
+
+    return figs, boxes
 
 
 def figs_scale (figs, scale=None, what='width'):
@@ -228,9 +274,9 @@ def arg_parse (args):
                      help="Tile graphics in of specified maximum width.")
     act.add_argument('-n', '--tile-num', type=int,
                      help="Tile up to the specified number of images per row.")
-    #act.add_argument('-m', '--matrix', type=int,
-    #                 help="Tile input files in a MATRIX*N matrix.")
-    act.add_argument('-l', '--overlay', action="store_true",
+    act.add_argument('-m', '--matrix', type=int,
+                     help="Center input files in a MATRIX*N matrix.")
+    act.add_argument('-l', '--overlay', action="store_true", default=False,
                      help="Stamp together (overlay) all input files in the specified order.")
 
 
@@ -239,7 +285,6 @@ def arg_parse (args):
                        help="Scale all images uniformly to match the width of first, largest, smallest image.")
     trans.add_argument('-S', '--scale-to-height', type=str, choices=['none', '0', 'first', '1', 'up', 'down' ],
                        help="Scale all images uniformly to match the height of first, largest, smallest image.")
-    
     
     p.add_argument('-f', '--frames', 
                    help="Draw frames around the graphics tiles.", action="store_true")
@@ -325,9 +370,13 @@ if __name__ == "__main__":
         log.debug ("Tiling to maximum of %d figures in a row" % (args.tile_num,))
         figs, boxes = figs_tile_max_num (figs, max_num=args.tile_num, frames=args.frames)
 
-    elif args.overlay is not None:
+    elif args.overlay is True:
         log.debug ("Calculating overlay (centered)")
         figs, boxes = figs_overlay (figs, valign='center', halign='center', frames=args.frames)
+
+    elif args.matrix is not None:
+        log.debug ("Matrix centering (%d columns)" % args.matrix)
+        figs, boxes = figs_tile_matrix (figs, cols=args.matrix, frames=args.frames)
 
 
 
